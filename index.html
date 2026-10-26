@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="Halloween 2D">
     <meta name="theme-color" content="#120a1c">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.
     <meta name="theme-color" content="#030712">
     <title>Halloween al 2D Lingotto</title>
     <!-- Caricamento Tailwind per la grafica -->
@@ -68,18 +68,18 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         window.FirebaseModules = {
             initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence,
-            getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc
+            getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc
         };
         window.dispatchEvent(new Event('firebase-loaded'));
     </script>
 
     <!-- Codice dell'Applicazione -->
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
         let Firebase, auth, db;
 
         const safeStorage = {
@@ -145,7 +145,7 @@
             const [isAdmin, setIsAdmin] = useState(false);
             const [activeTab, setActiveTab] = useState('feed');
             
-            const { signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence, collection, onSnapshot, doc, setDoc, getDoc, addDoc } = Firebase;
+            const { signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence, collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc } = Firebase;
 
             useEffect(() => {
                 let disposed = false;
@@ -255,6 +255,16 @@
                 return created.id;
             };
 
+            const handleReaction = async (post, emoji, userId) => {
+                if (!authUser || !post?.id) return;
+                const current = post.reactions || {};
+                const users = Array.isArray(current[emoji]) ? current[emoji] : [];
+                const nextUsers = users.includes(userId) ? users.filter(id => id !== userId) : [...users, userId];
+                const nextReactions = { ...current, [emoji]: nextUsers };
+                const postRef = doc(db, 'artifacts', appId, 'public', 'data', 'posts', post.id);
+                await updateDoc(postRef, { reactions: nextReactions });
+            };
+
             const saveVoting = async (newVoting) => {
                 if (!authUser) return;
                 const votingRef = doc(db, 'artifacts', appId, 'public', 'data', 'voting', 'main');
@@ -322,7 +332,7 @@
                     </header>
 
                     <main className="max-w-3xl mx-auto p-4">
-                        {activeTab === 'feed' && <FeedTab user={user} posts={posts} onAddPost={handleAddPost} />}
+                        {activeTab === 'feed' && <FeedTab user={user} posts={posts} onAddPost={handleAddPost} onReaction={handleReaction} />}
                         {activeTab === 'voting' && <VotingTab user={user} votingData={votingData} setVotingData={saveVoting} />}
                         {activeTab === 'admin' && <AdminTab isAdmin={isAdmin} setIsAdmin={setIsAdmin} votingData={votingData} setVotingData={saveVoting} />}
                     </main>
@@ -430,92 +440,84 @@
             );
         }
 
-        function FeedTab({ user, posts, onAddPost }) {
+        function FeedTab({ user, posts, onAddPost, onReaction }) {
             const [text, setText] = useState('');
-            const [selectedFile, setSelectedFile] = useState(null);
-            const [showImageInput, setShowImageInput] = useState(false);
+            const [capturedImage, setCapturedImage] = useState('');
+            const [cameraOpen, setCameraOpen] = useState(false);
             const [isPosting, setIsPosting] = useState(false);
             const [postError, setPostError] = useState('');
             const [postSuccess, setPostSuccess] = useState(false);
+            const [reactionError, setReactionError] = useState('');
+            const videoRef = useRef(null);
+            const streamRef = useRef(null);
+            const reactionOptions = ['❤️', '😂', '🔥', '💀', '👏'];
 
+            const stopCamera = () => {
+                if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current = null;
+                if (videoRef.current) videoRef.current.srcObject = null;
+                setCameraOpen(false);
+            };
+            useEffect(() => () => { if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop()); }, []);
+
+            const openCamera = async () => {
+                setPostError('');
+                try {
+                    if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera-not-supported');
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+                    streamRef.current = stream;
+                    setCameraOpen(true);
+                    setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); } }, 100);
+                } catch (err) {
+                    console.error('Accesso fotocamera non riuscito:', err);
+                    setPostError('Non riesco ad aprire la fotocamera. Consenti l’accesso e apri la pagina tramite HTTPS (su iPhone l’HTTP locale spesso non basta).');
+                }
+            };
+            const takePhoto = () => {
+                const video = videoRef.current;
+                if (!video || !video.videoWidth) { setPostError('La fotocamera si sta ancora avviando: riprova tra un secondo.'); return; }
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 800 / video.videoWidth, 800 / video.videoHeight);
+                canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                setCapturedImage(canvas.toDataURL('image/jpeg', 0.68));
+                stopCamera();
+            };
             const handlePost = async (e) => {
                 e.preventDefault();
-                if (!text.trim() && !selectedFile) return;
-                setIsPosting(true);
-                setPostError('');
-                setPostSuccess(false);
-                let finalImageUrl = '';
-
-                if (selectedFile) {
-                    try { finalImageUrl = await compressImage(selectedFile, 800, 800, 0.7); }
-                    catch (error) { console.error("Errore compressione", error); setIsPosting(false); return; }
-                }
-                
+                if (!text.trim() && !capturedImage) return;
+                setIsPosting(true); setPostError(''); setPostSuccess(false);
                 try {
-                    await onAddPost({ authorId: user.id, authorCostume: user.costumeName, authorAvatar: user.avatar, text: text.trim(), imageUrl: finalImageUrl, timestamp: Date.now() });
-                    setText(''); setSelectedFile(null); setShowImageInput(false); setPostSuccess(true);
+                    await onAddPost({ authorId: user.id, authorCostume: user.costumeName, authorAvatar: user.avatar, text: text.trim(), imageUrl: capturedImage, reactions: {}, timestamp: Date.now() });
+                    setText(''); setCapturedImage(''); setPostSuccess(true);
                 } catch (error) {
-                    console.error("Errore pubblicazione post:", error);
-                    setPostError(error?.code === 'permission-denied'
-                        ? "Firebase ha rifiutato la pubblicazione (permessi Firestore). Controlla le regole di sicurezza."
-                        : "Non è stato possibile pubblicare il post. Controlla la connessione e riprova.");
-                } finally {
-                    setIsPosting(false);
-                }
+                    console.error('Errore pubblicazione post:', error);
+                    setPostError(error?.code === 'permission-denied' ? 'Firebase ha rifiutato la pubblicazione (permessi Firestore). Controlla le regole di sicurezza.' : 'Non è stato possibile pubblicare il post. Controlla la connessione e riprova.');
+                } finally { setIsPosting(false); }
             };
-
-            const formatDate = (ms) => {
-                const d = new Date(ms);
-                return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-            };
+            const formatDate = (ms) => { const d = new Date(ms); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`; };
 
             return (
                 <div className="space-y-6">
                     <div className="bg-gray-900 p-4 rounded-2xl border border-gray-800 shadow-md">
                         <form onSubmit={handlePost}>
                             <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Scrivi un pensiero spettrale..." className="w-full bg-gray-800 text-white border border-gray-700 rounded-xl p-3 resize-none min-h-[90px] text-base" />
-                            {showImageInput && (
-                                <div className="mt-3"><input type="file" accept="image/*" onChange={(e) => setSelectedFile(e.target.files[0])} className="w-full bg-gray-800 text-white border border-gray-700 rounded-xl p-2 text-sm" /></div>
-                            )}
+                            {cameraOpen && <div className="mt-3 space-y-3"><video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl bg-black max-h-96 object-contain" /><div className="flex gap-2"><button type="button" onClick={takePhoto} className="flex-1 bg-orange-600 text-white font-bold py-3 rounded-xl">📸 Scatta istantanea</button><button type="button" onClick={stopCamera} className="bg-gray-700 text-white px-4 rounded-xl">Annulla</button></div></div>}
+                            {capturedImage && <div className="mt-3"><img src={capturedImage} alt="Anteprima istantanea appena scattata" className="w-full max-h-80 object-contain rounded-xl border border-purple-500/40"/><button type="button" onClick={() => setCapturedImage('')} className="mt-2 text-sm text-red-300 underline">Scatta di nuovo / rimuovi foto</button></div>}
                             {postError && <p role="alert" className="mt-3 rounded-xl border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-300">{postError}</p>}
-                            {postSuccess && <p role="status" className="mt-3 rounded-xl border border-green-500/30 bg-green-950/30 p-3 text-sm text-green-300">Post pubblicato correttamente!</p>}
-                            <div className="flex justify-between items-center mt-3">
-                                <button type="button" onClick={() => setShowImageInput(!showImageInput)} className="text-gray-400 hover:text-purple-400 flex items-center space-x-1 p-2 rounded-lg">
-                                    <ImageIcon className="w-5 h-5" />
-                                    <span className="text-sm font-medium">Allega Foto</span>
-                                </button>
-                                <button type="submit" disabled={(!text.trim() && !selectedFile) || isPosting} className="bg-purple-600 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2">
-                                    <span>{isPosting ? 'Invio...' : 'Pubblica'}</span>
-                                    <Send className="w-4 h-4" />
-                                </button>
-                            </div>
+                            {postSuccess && <p role="status" className="mt-3 rounded-xl border border-green-500/30 bg-green-950/30 p-3 text-sm text-green-300">Post pubblicato! La cripta ha ricevuto la tua prova fotografica. 👻</p>}
+                            <div className="flex flex-wrap justify-between items-center gap-2 mt-3"><button type="button" onClick={openCamera} disabled={cameraOpen} className="text-gray-200 hover:text-orange-400 flex items-center space-x-2 p-2 rounded-lg bg-gray-800"><ImageIcon className="w-5 h-5"/><span className="text-sm font-bold">📸 Scatta una foto ora</span></button><button type="submit" disabled={(!text.trim() && !capturedImage) || isPosting || cameraOpen} className="bg-purple-600 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2"><span>{isPosting ? 'Invio...' : 'Pubblica'}</span><Send className="w-4 h-4"/></button></div>
+                            <p className="text-xs text-gray-500 mt-2">Niente galleria: solo scatti fatti sul momento. La fotocamera richiede HTTPS e il tuo permesso.</p>
                         </form>
                     </div>
-
                     <div className="space-y-4">
-                        {posts.length === 0 ? (
-                            <div className="text-center text-gray-500 py-10"><Ghost className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>La bacheca è vuota.</p></div>
-                        ) : (
-                            posts.map(post => (
-                                <div key={post.id} className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-md">
-                                    <div className="p-4">
-                                        <div className="flex justify-between items-start mb-3">
-                                            <div className="flex items-center space-x-3">
-                                                <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-800 border border-purple-500/50 flex items-center justify-center text-xl shrink-0">
-                                                    {String(post.authorAvatar || '👻').startsWith('http') || String(post.authorAvatar || '👻').startsWith('data:image') ? <img src={post.authorAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (post.authorAvatar || '👻')}
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-orange-400">{post.authorCostume}</h3>
-                                                    <p className="text-xs text-gray-500">{formatDate(post.timestamp)}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        {post.text && <p className="text-gray-200 mt-2 whitespace-pre-wrap text-base">{post.text}</p>}
-                                    </div>
-                                    {post.imageUrl && <div className="w-full bg-black"><img src={post.imageUrl} alt="Allegato" className="w-full h-auto max-h-96 object-contain" /></div>}
-                                </div>
-                            ))
-                        )}
+                        {posts.length === 0 ? <div className="text-center text-gray-500 py-10"><Ghost className="w-12 h-12 mx-auto mb-3 opacity-20"/><p>La bacheca è vuota. Sii tu il primo fantasma con prove.</p></div> : posts.map(post => (
+                            <div key={post.id} className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-md">
+                                <div className="p-4"><div className="flex justify-between items-start mb-3"><div className="flex items-center space-x-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-gray-800 border border-purple-500/50 flex items-center justify-center text-xl shrink-0">{String(post.authorAvatar || '👻').startsWith('http') || String(post.authorAvatar || '👻').startsWith('data:image') ? <img src={post.authorAvatar} alt="Avatar" className="w-full h-full object-cover"/> : (post.authorAvatar || '👻')}</div><div><h3 className="font-bold text-orange-400">{post.authorCostume}</h3><p className="text-xs text-gray-500">{formatDate(post.timestamp)}</p></div></div></div>{post.text && <p className="text-gray-200 mt-2 whitespace-pre-wrap text-base">{post.text}</p>}</div>
+                                {post.imageUrl && <div className="w-full bg-black"><img src={post.imageUrl} alt="Foto scattata sul momento" className="w-full h-auto max-h-96 object-contain"/></div>}
+                                <div className="p-3 border-t border-gray-800"><div className="flex flex-wrap gap-2">{reactionOptions.map(emoji => { const users = (post.reactions && post.reactions[emoji]) || []; const selected = users.includes(user.id); return <button key={emoji} type="button" onClick={async () => { setReactionError(''); try { await onReaction(post, emoji, user.id); } catch(e) { console.error(e); setReactionError('Reazione non salvata: controlla i permessi Firestore.'); } }} className={`px-3 py-1.5 rounded-full border text-sm ${selected ? 'bg-purple-600/30 border-purple-400' : 'bg-gray-800 border-gray-700'}`} aria-label={`Reazione ${emoji}`}>{emoji} <span>{users.length}</span></button>; })}</div>{reactionError && <p className="text-xs text-red-300 mt-2">{reactionError}</p>}<p className="text-xs text-gray-500 mt-2">Reagisci con il cuore, una risata o un giudizio spettrale. Il silenzio è da NPC. 👀</p></div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             );
@@ -543,7 +545,7 @@
                     <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
                         <div className="bg-gray-900 p-6 rounded-full border-2 border-dashed border-gray-700"><Lock className="w-16 h-16 text-gray-600" /></div>
                         <h2 className="text-2xl font-bold text-gray-300">Votazioni Chiuse</h2>
-                        <p className="text-gray-500 max-w-sm">Attendi l'apertura delle votazioni...</p>
+                        <p className="text-gray-500 max-w-sm">L’aura è in fase di accumulo. Non tutti sono pronti a essere giudicati. 🧘‍♂️</p>
                     </div>
                 );
             }
@@ -553,7 +555,8 @@
                     <div className="space-y-6">
                         <div className="bg-gradient-to-r from-purple-900 to-gray-900 p-6 rounded-2xl border border-purple-500/30 text-center shadow-lg">
                             <Trophy className="w-12 h-12 text-yellow-500 mx-auto mb-2 animate-bounce" />
-                            <h2 className="text-2xl font-black text-white">Vota il Miglior Costume!</h2>
+                            <h2 className="text-2xl font-black text-white">Chi ha più aura? ✨</h2>
+                            <p className="text-purple-200 mt-2">Non è un concorso di bellezza: è una misurazione scientifica di presenza scenica, drip e potere mistico.</p>
                         </div>
                         <div className="space-y-3">
                             {votingData.candidates.map(candidate => (
@@ -576,9 +579,10 @@
                     <div className="space-y-6">
                         <div className="bg-gradient-to-br from-yellow-900/50 to-orange-900/50 p-8 rounded-3xl border border-yellow-600/50 text-center shadow-2xl">
                             <Trophy className="w-20 h-20 text-yellow-400 mx-auto mb-4" />
-                            <h2 className="text-3xl font-black text-white mb-2">Risultati Finali</h2>
+                            <h2 className="text-3xl font-black text-white mb-2">Classifica dell’Aura</h2>
+                            <p className="text-yellow-100/80 mb-4">Il server ha parlato. Gli haters possono accomodarsi nella dimensione parallela.</p>
                             {winner && winner.count > 0 ? (
-                                <div><h3 className="text-4xl font-black text-yellow-400">{winner.name}</h3><p className="text-yellow-500/80 font-bold mt-2">con {winner.count} voti!</p></div>
+                                <div><h3 className="text-4xl font-black text-yellow-400">{winner.name}</h3><p className="text-yellow-500/80 font-bold mt-2">con {winner.count} voti! Aura certificata: illegale ✨</p></div>
                             ) : (<p className="text-gray-400">Nessun voto registrato.</p>)}
                         </div>
                         <div className="bg-gray-900 rounded-2xl border border-gray-800 p-4">

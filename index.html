@@ -364,6 +364,11 @@
                                 <span className="text-xs font-bold">Vota</span>
                             </button>
 
+                            <button onClick={() => setActiveTab('payments')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'payments' ? 'text-emerald-400 scale-110' : 'text-gray-500 hover:text-gray-300'}`}>
+                                <span className="text-xl leading-6 mb-1">💸</span>
+                                <span className="text-xs font-bold">Quota</span>
+                            </button>
+
                         </div>
                     </nav>
                 </div>

@@ -337,7 +337,6 @@
                                     <div className="absolute right-0 top-12 z-50 w-56 rounded-2xl border border-purple-800 bg-gray-900 p-2 shadow-2xl">
                                         <div className="px-3 py-2 border-b border-gray-800 mb-1"><p className="font-bold text-white truncate">{user.costumeName || user.realName || 'Il tuo profilo'}</p><p className="text-xs text-gray-400">La tua cripta personale</p></div>
                                         <button onClick={() => { setActiveTab('profile'); setProfileMenuOpen(false); }} className="w-full text-left rounded-xl px-3 py-2.5 text-sm hover:bg-purple-900/60">👤 Vedi profilo</button>
-                                        <button onClick={() => { setActiveTab('payments'); setProfileMenuOpen(false); }} className="w-full text-left rounded-xl px-3 py-2.5 text-sm hover:bg-purple-900/60">💸 Pagamento quota</button>
                                         <button onClick={() => { setActiveTab('admin'); setProfileMenuOpen(false); }} className="w-full text-left rounded-xl px-3 py-2.5 text-sm text-red-300 hover:bg-red-950/60">⚙️ Admin</button>
                                     </div>
                                 </>}

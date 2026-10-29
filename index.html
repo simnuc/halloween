@@ -152,6 +152,7 @@
             const [isAdmin, setIsAdmin] = useState(false);
             const [activeTab, setActiveTab] = useState('feed');
             const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+            const [selectedProfile, setSelectedProfile] = useState(null);
             
             const { signInAnonymously, signInWithCustomToken, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc } = Firebase;
 
@@ -267,6 +268,28 @@
                 }
             };
 
+            const handleViewProfile = async (post) => {
+                if (!post) return;
+                const fallbackProfile = {
+                    id: post.authorId || '',
+                    costumeName: post.authorCostume || 'Profilo della cripta',
+                    avatar: post.authorAvatar || '👻',
+                    realName: post.authorRealName || ''
+                };
+                let profileToShow = fallbackProfile;
+                if (post.authorId) {
+                    try {
+                        const profileRef = doc(db, 'artifacts', appId, 'users', post.authorId, 'profile', 'info');
+                        const profileSnap = await getDoc(profileRef);
+                        if (profileSnap.exists()) profileToShow = { ...fallbackProfile, ...profileSnap.data(), id: post.authorId };
+                    } catch (e) {
+                        console.error('Impossibile caricare il profilo pubblico:', e);
+                    }
+                }
+                setSelectedProfile(profileToShow);
+                setActiveTab('userProfile');
+            };
+
             const handleAddPost = async (newPost) => {
                 if (!authUser) throw new Error("Accesso a Firebase non ancora pronto. Riprova tra qualche secondo.");
                 const postsRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
@@ -369,9 +392,10 @@
                     </header>
 
                     <main className="max-w-3xl mx-auto p-4">
-                        {activeTab === 'feed' && <FeedTab user={user} posts={posts} onAddPost={handleAddPost} onReaction={handleReaction} />}
+                        {activeTab === 'feed' && <FeedTab user={user} posts={posts} onAddPost={handleAddPost} onReaction={handleReaction} onViewProfile={handleViewProfile} />}
                         {activeTab === 'voting' && <VotingTab user={user} votingData={votingData} setVotingData={saveVoting} />}
                         {activeTab === 'profile' && <ProfileTab user={user} />}
+                        {activeTab === 'userProfile' && <PublicProfileTab profile={selectedProfile} onBack={() => setActiveTab('feed')} />}
                         {activeTab === 'payments' && <PaymentsTab />}
                         {activeTab === 'admin' && <AdminTab isAdmin={isAdmin} setIsAdmin={setIsAdmin} votingData={votingData} setVotingData={saveVoting} />}
                     </main>
@@ -408,6 +432,20 @@
                     <p className="text-sm text-purple-300 mt-4">Presenza spettrale confermata. Aura in fase di valutazione. 👻</p>
                 </div>
                 <button onClick={() => window.dispatchEvent(new CustomEvent('app-navigate', {detail:'feed'}))} className="w-full rounded-xl bg-purple-700 hover:bg-purple-600 py-3 font-bold">Torna alla bacheca</button>
+            </section>;
+        }
+
+        function PublicProfileTab({ profile, onBack }) {
+            if (!profile) return <section className="max-w-xl mx-auto text-center space-y-4"><p className="text-gray-300">Profilo non disponibile.</p><button onClick={onBack} className="rounded-xl bg-purple-700 hover:bg-purple-600 px-5 py-3 font-bold">Torna alla bacheca</button></section>;
+            const avatarIsImage = String(profile.avatar || '').startsWith('http') || String(profile.avatar || '').startsWith('data:image');
+            return <section className="max-w-xl mx-auto space-y-5">
+                <div className="rounded-3xl border border-purple-800 bg-gray-900 p-6 text-center shadow-xl">
+                    <div className="mx-auto mb-4 w-24 h-24 rounded-full overflow-hidden border-4 border-purple-500 bg-gray-800 flex items-center justify-center text-5xl">{avatarIsImage ? <img src={profile.avatar} alt="Foto profilo" className="w-full h-full object-cover" /> : (profile.avatar || '👻')}</div>
+                    <h2 className="text-2xl font-black text-white">{profile.costumeName || 'Profilo della cripta'}</h2>
+                    {profile.realName && <p className="text-gray-400 mt-1">{profile.realName}</p>}
+                    <p className="text-sm text-purple-300 mt-4">Un membro della cripta. 👻</p>
+                </div>
+                <button onClick={onBack} className="w-full rounded-xl bg-purple-700 hover:bg-purple-600 py-3 font-bold">Torna alla bacheca</button>
             </section>;
         }
 
@@ -528,7 +566,7 @@ Causale: ${reason}`, 'Dati bonifico')} className="w-full rounded-xl border borde
             );
         }
 
-        function FeedTab({ user, posts, onAddPost, onReaction }) {
+        function FeedTab({ user, posts, onAddPost, onReaction, onViewProfile }) {
             const [text, setText] = useState('');
             const [capturedImage, setCapturedImage] = useState('');
             const [cameraOpen, setCameraOpen] = useState(false);
@@ -601,7 +639,7 @@ Causale: ${reason}`, 'Dati bonifico')} className="w-full rounded-xl border borde
                     <div className="space-y-4">
                         {posts.length === 0 ? <div className="text-center text-gray-500 py-10"><Ghost className="w-12 h-12 mx-auto mb-3 opacity-20"/><p>La bacheca è vuota. Sii tu il primo fantasma con prove.</p></div> : posts.map(post => (
                             <div key={post.id} className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-md">
-                                <div className="p-4"><div className="flex justify-between items-start mb-3"><div className="flex items-center space-x-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-gray-800 border border-purple-500/50 flex items-center justify-center text-xl shrink-0">{String(post.authorAvatar || '👻').startsWith('http') || String(post.authorAvatar || '👻').startsWith('data:image') ? <img src={post.authorAvatar} alt="Avatar" className="w-full h-full object-cover"/> : (post.authorAvatar || '👻')}</div><div><h3 className="font-bold text-orange-400">{post.authorCostume}</h3><p className="text-xs text-gray-500">{formatDate(post.timestamp)}</p></div></div></div>{post.text && <p className="text-gray-200 mt-2 whitespace-pre-wrap text-base">{post.text}</p>}</div>
+                                <div className="p-4"><div className="flex justify-between items-start mb-3"><div className="flex items-center space-x-3"><button type="button" onClick={() => onViewProfile(post)} aria-label={`Visualizza il profilo di ${post.authorCostume || 'questo utente'}`} title="Visualizza profilo" className="w-10 h-10 rounded-full overflow-hidden bg-gray-800 border border-purple-500/50 flex items-center justify-center text-xl shrink-0 cursor-pointer hover:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-400">{String(post.authorAvatar || '👻').startsWith('http') || String(post.authorAvatar || '👻').startsWith('data:image') ? <img src={post.authorAvatar} alt="Avatar" className="w-full h-full object-cover"/> : (post.authorAvatar || '👻')}</button><div><button type="button" onClick={() => onViewProfile(post)} className="font-bold text-orange-400 text-left hover:underline">{post.authorCostume}</button><p className="text-xs text-gray-500">{formatDate(post.timestamp)}</p></div></div></div>{post.text && <p className="text-gray-200 mt-2 whitespace-pre-wrap text-base">{post.text}</p>}</div>
                                 {post.imageUrl && <div className="w-full bg-black"><img src={post.imageUrl} alt="Foto scattata sul momento" className="w-full h-auto max-h-96 object-contain"/></div>}
                                 <div className="p-3 border-t border-gray-800"><div className="flex flex-wrap gap-2">{reactionOptions.map(emoji => { const users = (post.reactions && post.reactions[emoji]) || []; const selected = users.includes(user.id); return <button key={emoji} type="button" onClick={async () => { setReactionError(''); try { await onReaction(post, emoji, user.id); } catch(e) { console.error(e); setReactionError('Reazione non salvata: controlla i permessi Firestore.'); } }} className={`px-3 py-1.5 rounded-full border text-sm ${selected ? 'bg-purple-600/30 border-purple-400' : 'bg-gray-800 border-gray-700'}`} aria-label={`Reazione ${emoji}`}>{emoji} <span>{users.length}</span></button>; })}</div>{reactionError && <p className="text-xs text-red-300 mt-2">{reactionError}</p>}</div>
                             </div>
